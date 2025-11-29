@@ -12,30 +12,16 @@ class GroupService {
         6, (_) => chars.codeUnitAt(rnd.nextInt(chars.length))));
   }
 
-  // --- FUNGSI BARU: KELUAR DARI SEMUA GRUP LAMA ---
-  // Kita pastikan user bersih dari grup manapun sebelum masuk yang baru
-  Future<void> _leaveAllGroups(String userId) async {
-    // Cari semua grup dimana user ini terdaftar sebagai member
-    QuerySnapshot snapshot = await _firestore
-        .collection('groups')
-        .where('members', arrayContains: userId)
-        .get();
-
-    for (var doc in snapshot.docs) {
-      // Hapus userId dari array 'members'
-      await doc.reference.update({
-        'members': FieldValue.arrayRemove([userId])
-      });
-    }
+  // Helper: Update data User biar dia ingat dia lagi di grup mana
+  Future<void> _updateUserCurrentGroup(String userId, String groupId) async {
+    await _firestore.collection('users').doc(userId).update({
+      'currentGroupId': groupId, // <--- INI KUNCINYA
+    });
   }
 
-  // FUNGSI 1: Create Group (Updated)
+  // FUNGSI 1: Create Group
   Future<String?> createGroup(String groupName, String adminId) async {
     try {
-      // STEP 1: Keluar dulu dari grup lama (FIX BUG ID NYANGKUT)
-      await _leaveAllGroups(adminId);
-
-      // STEP 2: Baru bikin grup baru
       String groupId = _generateGroupId();
       GroupModel newGroup = GroupModel(
         id: groupId,
@@ -44,7 +30,12 @@ class GroupService {
         members: [adminId],
       );
 
+      // 1. Simpan Grup Baru
       await _firestore.collection('groups').doc(groupId).set(newGroup.toMap());
+      
+      // 2. Tandai di User bahwa ini grup TERBARU-nya
+      await _updateUserCurrentGroup(adminId, groupId);
+
       return groupId;
     } catch (e) {
       print("Error Create Group: $e");
@@ -52,21 +43,26 @@ class GroupService {
     }
   }
 
-  // FUNGSI 2: Join Group (Updated)
+  // FUNGSI 2: Join Group
   Future<bool> joinGroup(String groupId, String userId) async {
     try {
       DocumentReference groupRef = _firestore.collection('groups').doc(groupId);
       DocumentSnapshot doc = await groupRef.get();
 
-      if (!doc.exists) return false;
-
-      // STEP 1: Keluar dulu dari grup lama
-      await _leaveAllGroups(userId);
-
-      // STEP 2: Masuk grup baru
+      if (!doc.exists) {
+          print("---------------------------------------");
+          print("GAGAL JOIN! Dokumen tidak ditemukan.");
+          print("ID yang dicari HP: '$groupId'"); 
+          print("---------------------------------------");
+          return false; 
+        }
+      // 1. Masukkan user ke member grup
       await groupRef.update({
         'members': FieldValue.arrayUnion([userId])
       });
+
+      // 2. Tandai di User bahwa ini grup TERBARU-nya
+      await _updateUserCurrentGroup(userId, groupId);
 
       return true;
     } catch (e) {
