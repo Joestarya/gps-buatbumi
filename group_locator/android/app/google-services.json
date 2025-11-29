@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "305290585380",
+    "project_id": "grouplocatorapp-ccd18",
+    "storage_bucket": "grouplocatorapp-ccd18.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:305290585380:android:3060869b6ea288cfb33fb1",
+        "android_client_info": {
+          "package_name": "com.example.group_locator"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBzb_pU9IJu6xeWB3GPljTwD_TreVWENRA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
