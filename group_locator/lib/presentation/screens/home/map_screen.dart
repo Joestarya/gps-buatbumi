@@ -30,6 +30,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   LatLng? _myPosition;
   String? _myGroupId;
   bool _isLoading = true;
+  bool _isMemberListOpen = false;
   StreamSubscription<Position>? _positionStream;
   String? _selectedUserId; // ID anggota yang dipilih dari legenda
   static const Distance _distanceCalc = Distance();
@@ -251,152 +252,157 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ],
                 ),
                 
-// --- PANEL ANGGOTA (Versi Final: Layout Aman + Ada Navigasi) ---
+// --- PANEL ANGGOTA (Versi Bisa Buka/Tutup) ---
                 if (_myGroupId != null)
                   Positioned(
                     right: 12,
-                    top: 100,
-                    child: Container(
-                      width: 200, // Lebar kotak
-                      // 1. Batasi tinggi maksimal biar aman di Laptop
-                      constraints: const BoxConstraints(
-                        maxHeight: 300, 
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.95),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-                      ),
-                      child: StreamBuilder<DocumentSnapshot>(
-                        stream: _locationService.streamGroupData(_myGroupId!),
-                        builder: (context, groupSnapshot) {
-                          if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
-                            return const SizedBox();
-                          }
-                          final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
-                          final List<dynamic> memberIdsDyn = groupData['members'] ?? [];
-                          final List<String> memberIds = memberIdsDyn.map((e) => e.toString()).toList();
+                    top: 170, // Turunkan ke 170 biar GAK NABRAK tombol kompas
+                    child: StreamBuilder<DocumentSnapshot>(
+                      stream: _locationService.streamGroupData(_myGroupId!),
+                      builder: (context, groupSnapshot) {
+                        if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
+                          return const SizedBox();
+                        }
+                        
+                        final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
+                        final List<dynamic> memberIdsDyn = groupData['members'] ?? [];
+                        final List<String> memberIds = memberIdsDyn.map((e) => e.toString()).toList();
 
-                          return Column(
-                            mainAxisSize: MainAxisSize.min, // Biar tinggi menyesuaikan isi
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // HEADER
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.end, // Rata kanan
+                          children: [
+                            // 1. TOMBOL HEADER (Selalu Muncul)
+                            InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _isMemberListOpen = !_isMemberListOpen; // Ubah status Buka/Tutup
+                                });
+                              },
+                              child: Container(
+                                height: 45,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(25), // Bulat lonjong
+                                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                                ),
                                 child: Row(
+                                  mainAxisSize: MainAxisSize.min, // Lebar menyesuaikan isi
                                   children: [
-                                    const Icon(Icons.group, size: 18, color: Colors.black54),
+                                    const Icon(Icons.people, color: Colors.blue),
                                     const SizedBox(width: 8),
-                                    const Text("Anggota", style: TextStyle(fontWeight: FontWeight.w600)),
-                                    const Spacer(),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(10)),
-                                      child: Text(memberIds.length.toString(), style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
-                                    )
+                                    Text(
+                                      "Anggota (${memberIds.length})", 
+                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)
+                                    ),
+                                    const SizedBox(width: 8),
+                                    // Panah indikator (Atas/Bawah)
+                                    Icon(
+                                      _isMemberListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                      color: Colors.grey,
+                                    ),
                                   ],
                                 ),
                               ),
-                              const Divider(height: 1),
-                              
-                              // LIST MEMBER (Scrollable)
-                              Flexible(
-                                child: memberIds.isEmpty
-                                    ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget...", style: TextStyle(fontSize: 12)))
-                                    : StreamBuilder<QuerySnapshot>(
-                                        stream: _locationService.streamUsersLocation(memberIds),
-                                        builder: (context, usersSnapshot) {
-                                          if (!usersSnapshot.hasData) return const Center(child: LinearProgressIndicator());
-                                          
-                                          final docs = usersSnapshot.data!.docs;
-                                          return ListView.separated(
-                                            padding: const EdgeInsets.all(12),
-                                            shrinkWrap: true,
-                                            itemCount: docs.length,
-                                            separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                            itemBuilder: (context, index) {
-                                              final data = docs[index].data() as Map<String, dynamic>;
-                                              final String name = (data['name'] ?? 'No Name').toString();
-                                              final bool isMe = data['uid']?.toString() == _myUid;
-                                              
-                                              return InkWell(
-                                                onTap: () {
-                                                  // Klik nama -> Pindah kamera
-                                                  if (data['latitude'] != null) {
-                                                    _mapController.move(LatLng(data['latitude'], data['longitude']), 16.0);
-                                                    setState(() => _selectedUserId = data['uid']);
-                                                  }
-                                                },
-                                                child: Row(
-                                                  children: [
-                                                    // 1. Avatar
-                                                    Container(
-                                                      width: 32, height: 32,
-                                                      decoration: BoxDecoration(
-                                                        color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
-                                                        shape: BoxShape.circle,
-                                                        border: data['uid'] == _selectedUserId ? Border.all(color: Colors.blue, width: 2) : null,
-                                                      ),
-                                                      child: Center(
-                                                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : "?", 
-                                                          style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? Colors.blue : Colors.black54)),
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    
-                                                    // 2. Nama & Jarak
-                                                    Expanded(
-                                                      child: Column(
-                                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                                        children: [
-                                                          Text(isMe ? "$name (Saya)" : name, 
-                                                            style: TextStyle(fontSize: 12, fontWeight: isMe ? FontWeight.bold : FontWeight.normal),
-                                                            overflow: TextOverflow.ellipsis),
-                                                          if (_myPosition != null && data['latitude'] != null)
-                                                            Text(
-                                                              _formatDistance(_distanceCalc(_myPosition!, LatLng(data['latitude'], data['longitude']))),
-                                                              style: const TextStyle(fontSize: 10, color: Colors.grey),
-                                                            ),
-                                                        ],
-                                                      ),
-                                                    ),
+                            ),
 
-                                                    // 3. TOMBOL NAVIGASI (INI YANG TADI HILANG)
-                                                    if (!isMe && data['latitude'] != null) 
-                                                      IconButton(
-                                                        icon: const Icon(Icons.navigation, size: 18, color: Colors.blue),
-                                                        padding: EdgeInsets.zero,
-                                                        constraints: const BoxConstraints(), // Biar tombolnya gak makan tempat
-                                                        onPressed: () async {
-                                                          // Buka Google Maps
-                                                          final double lat = (data['latitude'] as num).toDouble();
-                                                          final double lng = (data['longitude'] as num).toDouble();
-                                                          
-                                                          // URL Google Maps Direction
-                                                          final Uri url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
-                                                          
-                                                          if (await canLaunchUrl(url)) {
-                                                            await launchUrl(url, mode: LaunchMode.externalApplication);
-                                                          } else {
-                                                            ScaffoldMessenger.of(context).showSnackBar(
-                                                              const SnackBar(content: Text('Tidak bisa membuka Google Maps')),
-                                                            );
-                                                          }
-                                                        },
+                            const SizedBox(height: 8), // Jarak antara tombol dan list
+
+                            // 2. DAFTAR MEMBER (Cuma Muncul Kalau _isMemberListOpen == true)
+                            if (_isMemberListOpen)
+                              Container(
+                                width: 200,
+                                constraints: const BoxConstraints(maxHeight: 250), // Batasi tinggi
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.95),
+                                  borderRadius: BorderRadius.circular(18),
+                                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                                ),
+                                child: Flexible(
+                                  child: memberIds.isEmpty
+                                      ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget..."))
+                                      : StreamBuilder<QuerySnapshot>(
+                                          stream: _locationService.streamUsersLocation(memberIds),
+                                          builder: (context, usersSnapshot) {
+                                            if (!usersSnapshot.hasData) return const Padding(padding: EdgeInsets.all(10), child: Center(child: CircularProgressIndicator()));
+                                            
+                                            final docs = usersSnapshot.data!.docs;
+                                            return ListView.separated(
+                                              padding: const EdgeInsets.all(12),
+                                              shrinkWrap: true,
+                                              itemCount: docs.length,
+                                              separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                              itemBuilder: (context, index) {
+                                                final data = docs[index].data() as Map<String, dynamic>;
+                                                final String name = (data['name'] ?? 'No Name').toString();
+                                                final bool isMe = data['uid']?.toString() == _myUid;
+                                                
+                                                return InkWell(
+                                                  onTap: () {
+                                                    if (data['latitude'] != null) {
+                                                      _mapController.move(LatLng(data['latitude'], data['longitude']), 16.0);
+                                                      setState(() => _selectedUserId = data['uid']);
+                                                    }
+                                                  },
+                                                  child: Row(
+                                                    children: [
+                                                      // Avatar Kecil
+                                                      Container(
+                                                        width: 32, height: 32,
+                                                        decoration: BoxDecoration(
+                                                          color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
+                                                          shape: BoxShape.circle,
+                                                          border: data['uid'] == _selectedUserId ? Border.all(color: Colors.blue, width: 2) : null,
+                                                        ),
+                                                        child: Center(
+                                                          child: Text(name.isNotEmpty ? name[0].toUpperCase() : "?", 
+                                                            style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? Colors.blue : Colors.black54)),
+                                                        ),
                                                       ),
-                                                  ],
-                                                ),
-                                              );
-                                            },
-                                          );
-                                        },
-                                      ),
+                                                      const SizedBox(width: 8),
+                                                      // Nama & Status
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                                          children: [
+                                                            Text(isMe ? "$name (Saya)" : name, 
+                                                              style: TextStyle(fontSize: 12, fontWeight: isMe ? FontWeight.bold : FontWeight.normal),
+                                                              overflow: TextOverflow.ellipsis),
+                                                            if (_myPosition != null && data['latitude'] != null)
+                                                              Text(
+                                                                _formatDistance(_distanceCalc(_myPosition!, LatLng(data['latitude'], data['longitude']))),
+                                                                style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                                              ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      // Tombol Navigasi
+                                                      if (!isMe && data['latitude'] != null) 
+                                                        IconButton(
+                                                          icon: const Icon(Icons.navigation, size: 18, color: Colors.blue),
+                                                          padding: EdgeInsets.zero,
+                                                          constraints: const BoxConstraints(),
+                                                          onPressed: () async {
+                                                            final double lat = (data['latitude'] as num).toDouble();
+                                                            final double lng = (data['longitude'] as num).toDouble();
+                                                            final Uri url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+                                                            if (await canLaunchUrl(url)) {
+                                                              await launchUrl(url, mode: LaunchMode.externalApplication);
+                                                            }
+                                                          },
+                                                        ),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                            );
+                                          },
+                                        ),
+                                ),
                               ),
-                            ],
-                          );
-                        },
-                      ),
+                          ],
+                        );
+                      },
                     ),
                   ),
 
