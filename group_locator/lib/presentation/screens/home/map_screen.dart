@@ -251,33 +251,37 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ],
                 ),
                 
-                // LEGEND ANGGOTA GRUP (Panel vertikal di kanan seperti contoh)
+// --- PANEL ANGGOTA (Versi Final: Layout Aman + Ada Navigasi) ---
                 if (_myGroupId != null)
                   Positioned(
                     right: 12,
-                    top: 130,
-                    bottom: 400,
-                    child: StreamBuilder<DocumentSnapshot>(
-                      stream: _locationService.streamGroupData(_myGroupId!),
-                      builder: (context, groupSnapshot) {
-                        if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
-                          return const SizedBox();
-                        }
-                        final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
-                        final List<dynamic> memberIdsDyn = groupData['members'] ?? [];
-                        final List<String> memberIds = memberIdsDyn.map((e) => e.toString()).toList();
+                    top: 100,
+                    child: Container(
+                      width: 200, // Lebar kotak
+                      // 1. Batasi tinggi maksimal biar aman di Laptop
+                      constraints: const BoxConstraints(
+                        maxHeight: 300, 
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.95),
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                      ),
+                      child: StreamBuilder<DocumentSnapshot>(
+                        stream: _locationService.streamGroupData(_myGroupId!),
+                        builder: (context, groupSnapshot) {
+                          if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
+                            return const SizedBox();
+                          }
+                          final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
+                          final List<dynamic> memberIdsDyn = groupData['members'] ?? [];
+                          final List<String> memberIds = memberIdsDyn.map((e) => e.toString()).toList();
 
-                        return Container(
-                          width: 180,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-                          ),
-                          child: Column(
+                          return Column(
+                            mainAxisSize: MainAxisSize.min, // Biar tinggi menyesuaikan isi
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Header dengan badge jumlah anggota
+                              // HEADER
                               Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                 child: Row(
@@ -288,154 +292,111 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     const Spacer(),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.shade50,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        memberIds.length.toString(),
-                                        style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
-                                      ),
+                                      decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(10)),
+                                      child: Text(memberIds.length.toString(), style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
                                     )
                                   ],
                                 ),
                               ),
                               const Divider(height: 1),
-                              Expanded(
+                              
+                              // LIST MEMBER (Scrollable)
+                              Flexible(
                                 child: memberIds.isEmpty
-                                    ? const Center(child: Text("Belum ada anggota", style: TextStyle(fontSize: 12)))
+                                    ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget...", style: TextStyle(fontSize: 12)))
                                     : StreamBuilder<QuerySnapshot>(
                                         stream: _locationService.streamUsersLocation(memberIds),
                                         builder: (context, usersSnapshot) {
-                                          if (!usersSnapshot.hasData) {
-                                            return const Center(child: CircularProgressIndicator());
-                                          }
+                                          if (!usersSnapshot.hasData) return const Center(child: LinearProgressIndicator());
+                                          
                                           final docs = usersSnapshot.data!.docs;
                                           return ListView.separated(
                                             padding: const EdgeInsets.all(12),
+                                            shrinkWrap: true,
                                             itemCount: docs.length,
                                             separatorBuilder: (_, __) => const SizedBox(height: 8),
                                             itemBuilder: (context, index) {
                                               final data = docs[index].data() as Map<String, dynamic>;
-                                              final String name = (data['name'] ?? 'Tanpa Nama').toString();
-                                              final String? photoUrl = data['photoUrl'] as String?;
+                                              final String name = (data['name'] ?? 'No Name').toString();
                                               final bool isMe = data['uid']?.toString() == _myUid;
-
-                                              // Avatar bergaya bulat dengan border seperti contoh
-                                              return Container(
-                                                decoration: BoxDecoration(
-                                                  color: data['uid'] == _selectedUserId ? Colors.deepPurple.shade50 : Colors.grey.shade100,
-                                                  borderRadius: BorderRadius.circular(14),
-                                                ),
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                                child: InkWell(
-                                                  onTap: () {
-                                                    setState(() {
-                                                      // Toggle seleksi
-                                                      final String id = data['uid'].toString();
-                                                      _selectedUserId = (_selectedUserId == id) ? null : id;
-                                                      // Opsional: Recenter ke user yang dipilih jika punya koordinat
-                                                      if (_selectedUserId != null && data['latitude'] != null && data['longitude'] != null) {
-                                                        final LatLng target = LatLng(data['latitude'], data['longitude']);
-                                                        _mapController.move(target, 16.0);
-                                                      }
-                                                    });
-                                                  },
-                                                  borderRadius: BorderRadius.circular(14),
-                                                  child: Row(
+                                              
+                                              return InkWell(
+                                                onTap: () {
+                                                  // Klik nama -> Pindah kamera
+                                                  if (data['latitude'] != null) {
+                                                    _mapController.move(LatLng(data['latitude'], data['longitude']), 16.0);
+                                                    setState(() => _selectedUserId = data['uid']);
+                                                  }
+                                                },
+                                                child: Row(
                                                   children: [
+                                                    // 1. Avatar
                                                     Container(
-                                                      width: 40,
-                                                      height: 40,
+                                                      width: 32, height: 32,
                                                       decoration: BoxDecoration(
+                                                        color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
                                                         shape: BoxShape.circle,
-                                                        border: Border.all(color: data['uid'] == _selectedUserId ? Colors.deepPurple : Colors.deepPurple, width: data['uid'] == _selectedUserId ? 3 : 2),
+                                                        border: data['uid'] == _selectedUserId ? Border.all(color: Colors.blue, width: 2) : null,
                                                       ),
-                                                      child: ClipOval(
-                                                        child: photoUrl != null && photoUrl.isNotEmpty
-                                                            ? Image.network(photoUrl, fit: BoxFit.cover)
-                                                            : Center(
-                                                                child: Text(
-                                                                  name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-                                                                ),
-                                                              ),
+                                                      child: Center(
+                                                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : "?", 
+                                                          style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? Colors.blue : Colors.black54)),
                                                       ),
                                                     ),
-                                                    const SizedBox(width: 10),
+                                                    const SizedBox(width: 8),
+                                                    
+                                                    // 2. Nama & Jarak
                                                     Expanded(
                                                       child: Column(
                                                         crossAxisAlignment: CrossAxisAlignment.start,
                                                         children: [
-                                                          Row(
-                                                            children: [
-                                                              Flexible(
-                                                                child: Text(
-                                                                  isMe ? "$name (Me)" : name,
-                                                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                                                                  overflow: TextOverflow.ellipsis,
-                                                                ),
-                                                              ),
-                                                              
-                                                            ],
-                                                          ),
-                                                          const SizedBox(height: 2),
-                                                          Builder(
-                                                            builder: (context) {
-                                                              // Hitung jarak
-                                                              if (_myPosition == null || data['latitude'] == null || data['longitude'] == null) {
-                                                                return const Text("Jarak: -", style: TextStyle(fontSize: 11, color: Colors.black54));
-                                                              }
-                                                              double lat = (data['latitude'] as num).toDouble();
-                                                              double lng = (data['longitude'] as num).toDouble();
-                                                              double meters = _distanceCalc(
-                                                                _myPosition!,
-                                                                LatLng(lat, lng),
-                                                              );
-                                                              return Text(
-                                                                "Jarak: ${_formatDistance(meters)}",
-                                                                style: TextStyle(
-                                                                  fontSize: 11,
-                                                                  color: data['uid'] == _selectedUserId ? Colors.deepPurple : Colors.black54,
-                                                                  fontWeight: data['uid'] == _selectedUserId ? FontWeight.w600 : FontWeight.w400,
-                                                                ),
-                                                              );
-                                                            },
-                                                          ),
+                                                          Text(isMe ? "$name (Saya)" : name, 
+                                                            style: TextStyle(fontSize: 12, fontWeight: isMe ? FontWeight.bold : FontWeight.normal),
+                                                            overflow: TextOverflow.ellipsis),
+                                                          if (_myPosition != null && data['latitude'] != null)
+                                                            Text(
+                                                              _formatDistance(_distanceCalc(_myPosition!, LatLng(data['latitude'], data['longitude']))),
+                                                              style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                                            ),
                                                         ],
                                                       ),
                                                     ),
-                                                    IconButton(
-                                                      icon: const Icon(Icons.navigation, size: 20, color: Colors.blue),
-                                                      onPressed: () async {
-                                                        if (data['latitude'] != null && data['longitude'] != null) {
+
+                                                    // 3. TOMBOL NAVIGASI (INI YANG TADI HILANG)
+                                                    if (!isMe && data['latitude'] != null) 
+                                                      IconButton(
+                                                        icon: const Icon(Icons.navigation, size: 18, color: Colors.blue),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(), // Biar tombolnya gak makan tempat
+                                                        onPressed: () async {
+                                                          // Buka Google Maps
                                                           final double lat = (data['latitude'] as num).toDouble();
                                                           final double lng = (data['longitude'] as num).toDouble();
+                                                          
+                                                          // URL Google Maps Direction
                                                           final Uri url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+                                                          
                                                           if (await canLaunchUrl(url)) {
-                                                            await launchUrl(url);
+                                                            await launchUrl(url, mode: LaunchMode.externalApplication);
                                                           } else {
-                                                            // Fallback or show error
                                                             ScaffoldMessenger.of(context).showSnackBar(
-                                                              const SnackBar(content: Text('Tidak dapat membuka navigasi')),
+                                                              const SnackBar(content: Text('Tidak bisa membuka Google Maps')),
                                                             );
                                                           }
-                                                        }
-                                                      },
-                                                    ),
+                                                        },
+                                                      ),
                                                   ],
-                                                ), // Row
-                                              ), // InkWell
-                                            ); // Container
+                                                ),
+                                              );
                                             },
                                           );
                                         },
                                       ),
-                              )
+                              ),
                             ],
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
                   ),
 
