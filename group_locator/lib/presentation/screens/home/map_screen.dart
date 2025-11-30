@@ -132,6 +132,34 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
   }
 
+  // Dialog konfirmasi logout
+  void _showLogoutConfirmation(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: const Text('Konfirmasi Logout'),
+        content: const Text('Apakah kamu yakin ingin logout?'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Close
+            },
+            child: const Text('Batalkan'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Close
+              _handleLogout(); // Logging out
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
   @override
   void dispose() {
     _positionStream?.cancel();
@@ -144,7 +172,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return Scaffold(
       appBar: AppBar(
         title: Text(_myGroupId == null ? "Belum Ada Grup" : "Grup: $_myGroupId"),
-        actions: [IconButton(icon: const Icon(Icons.logout), onPressed: _handleLogout)],
+        actions: [
+          IconButton(
+          icon: const Icon(Icons.logout),
+          tooltip: 'Logout',
+          onPressed: () => _showLogoutConfirmation(context), 
+  ),
+],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
