@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart'; // Koordinat
 import 'package:geolocator/geolocator.dart'; // GPS
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/location_service.dart';
@@ -30,6 +31,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   String? _myGroupId;
   bool _isLoading = true;
   StreamSubscription<Position>? _positionStream;
+  String? _selectedUserId; // ID anggota yang dipilih dari legenda
+  static const Distance _distanceCalc = Distance();
+
+  String _formatDistance(double meters) {
+    if (meters < 1) return "<1 m";
+    if (meters < 1000) return "${meters.round()} m";
+    double km = meters / 1000;
+    return km < 10 ? "${km.toStringAsFixed(2)} km" : "${km.toStringAsFixed(1)} km";
+  }
 
   @override
   void initState() {
@@ -183,15 +193,51 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                               for (var doc in userSnapshot.data!.docs) {
                                 var data = doc.data() as Map<String, dynamic>;
                                 if (data['uid'] != _myUid && data['latitude'] != null) {
+                                  final bool isSelected = data['uid'] == _selectedUserId;
                                   friendMarkers.add(Marker(
                                       point: LatLng(data['latitude'], data['longitude']),
-                                      width: 100, height: 80,
+                                      width: isSelected ? 120 : 100,
+                                      height: isSelected ? 100 : 80,
                                       child: Column(children: [
-                                          const Icon(Icons.face, color: Colors.blue, size: 40),
+                                          AnimatedContainer(
+                                            duration: const Duration(milliseconds: 250),
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: isSelected ? Colors.deepPurple : Colors.blue,
+                                              boxShadow: isSelected
+                                                  ? [
+                                                      BoxShadow(
+                                                        color: Colors.deepPurple.withOpacity(0.5),
+                                                        blurRadius: 12,
+                                                        spreadRadius: 4,
+                                                      )
+                                                    ]
+                                                  : [],
+                                            ),
+                                            child: Icon(
+                                              Icons.face,
+                                              color: Colors.white,
+                                              size: isSelected ? 46 : 40,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(5)),
-                                            child: Text(data['name'] ?? "Teman", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                            decoration: BoxDecoration(
+                                              color: isSelected ? Colors.deepPurple.shade50 : Colors.white,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: isSelected ? Border.all(color: Colors.deepPurple, width: 1) : null,
+                                            ),
+                                            child: Text(
+                                              data['name'] ?? "Teman",
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: isSelected ? Colors.deepPurple : Colors.black,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
                                       ]),
                                   ));
@@ -205,6 +251,194 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ],
                 ),
                 
+                // LEGEND ANGGOTA GRUP (Panel vertikal di kanan seperti contoh)
+                if (_myGroupId != null)
+                  Positioned(
+                    right: 12,
+                    top: 130,
+                    bottom: 400,
+                    child: StreamBuilder<DocumentSnapshot>(
+                      stream: _locationService.streamGroupData(_myGroupId!),
+                      builder: (context, groupSnapshot) {
+                        if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
+                          return const SizedBox();
+                        }
+                        final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
+                        final List<dynamic> memberIdsDyn = groupData['members'] ?? [];
+                        final List<String> memberIds = memberIdsDyn.map((e) => e.toString()).toList();
+
+                        return Container(
+                          width: 180,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.9),
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Header dengan badge jumlah anggota
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.group, size: 18, color: Colors.black54),
+                                    const SizedBox(width: 8),
+                                    const Text("Anggota", style: TextStyle(fontWeight: FontWeight.w600)),
+                                    const Spacer(),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        memberIds.length.toString(),
+                                        style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                                      ),
+                                    )
+                                  ],
+                                ),
+                              ),
+                              const Divider(height: 1),
+                              Expanded(
+                                child: memberIds.isEmpty
+                                    ? const Center(child: Text("Belum ada anggota", style: TextStyle(fontSize: 12)))
+                                    : StreamBuilder<QuerySnapshot>(
+                                        stream: _locationService.streamUsersLocation(memberIds),
+                                        builder: (context, usersSnapshot) {
+                                          if (!usersSnapshot.hasData) {
+                                            return const Center(child: CircularProgressIndicator());
+                                          }
+                                          final docs = usersSnapshot.data!.docs;
+                                          return ListView.separated(
+                                            padding: const EdgeInsets.all(12),
+                                            itemCount: docs.length,
+                                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                            itemBuilder: (context, index) {
+                                              final data = docs[index].data() as Map<String, dynamic>;
+                                              final String name = (data['name'] ?? 'Tanpa Nama').toString();
+                                              final String? photoUrl = data['photoUrl'] as String?;
+                                              final bool isMe = data['uid']?.toString() == _myUid;
+
+                                              // Avatar bergaya bulat dengan border seperti contoh
+                                              return Container(
+                                                decoration: BoxDecoration(
+                                                  color: data['uid'] == _selectedUserId ? Colors.deepPurple.shade50 : Colors.grey.shade100,
+                                                  borderRadius: BorderRadius.circular(14),
+                                                ),
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                child: InkWell(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      // Toggle seleksi
+                                                      final String id = data['uid'].toString();
+                                                      _selectedUserId = (_selectedUserId == id) ? null : id;
+                                                      // Opsional: Recenter ke user yang dipilih jika punya koordinat
+                                                      if (_selectedUserId != null && data['latitude'] != null && data['longitude'] != null) {
+                                                        final LatLng target = LatLng(data['latitude'], data['longitude']);
+                                                        _mapController.move(target, 16.0);
+                                                      }
+                                                    });
+                                                  },
+                                                  borderRadius: BorderRadius.circular(14),
+                                                  child: Row(
+                                                  children: [
+                                                    Container(
+                                                      width: 40,
+                                                      height: 40,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        border: Border.all(color: data['uid'] == _selectedUserId ? Colors.deepPurple : Colors.deepPurple, width: data['uid'] == _selectedUserId ? 3 : 2),
+                                                      ),
+                                                      child: ClipOval(
+                                                        child: photoUrl != null && photoUrl.isNotEmpty
+                                                            ? Image.network(photoUrl, fit: BoxFit.cover)
+                                                            : Center(
+                                                                child: Text(
+                                                                  name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                                                                ),
+                                                              ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Row(
+                                                            children: [
+                                                              Flexible(
+                                                                child: Text(
+                                                                  isMe ? "$name (Me)" : name,
+                                                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                                                  overflow: TextOverflow.ellipsis,
+                                                                ),
+                                                              ),
+                                                              
+                                                            ],
+                                                          ),
+                                                          const SizedBox(height: 2),
+                                                          Builder(
+                                                            builder: (context) {
+                                                              // Hitung jarak
+                                                              if (_myPosition == null || data['latitude'] == null || data['longitude'] == null) {
+                                                                return const Text("Jarak: -", style: TextStyle(fontSize: 11, color: Colors.black54));
+                                                              }
+                                                              double lat = (data['latitude'] as num).toDouble();
+                                                              double lng = (data['longitude'] as num).toDouble();
+                                                              double meters = _distanceCalc(
+                                                                _myPosition!,
+                                                                LatLng(lat, lng),
+                                                              );
+                                                              return Text(
+                                                                "Jarak: ${_formatDistance(meters)}",
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  color: data['uid'] == _selectedUserId ? Colors.deepPurple : Colors.black54,
+                                                                  fontWeight: data['uid'] == _selectedUserId ? FontWeight.w600 : FontWeight.w400,
+                                                                ),
+                                                              );
+                                                            },
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      icon: const Icon(Icons.navigation, size: 20, color: Colors.blue),
+                                                      onPressed: () async {
+                                                        if (data['latitude'] != null && data['longitude'] != null) {
+                                                          final double lat = (data['latitude'] as num).toDouble();
+                                                          final double lng = (data['longitude'] as num).toDouble();
+                                                          final Uri url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+                                                          if (await canLaunchUrl(url)) {
+                                                            await launchUrl(url);
+                                                          } else {
+                                                            // Fallback or show error
+                                                            ScaffoldMessenger.of(context).showSnackBar(
+                                                              const SnackBar(content: Text('Tidak dapat membuka navigasi')),
+                                                            );
+                                                          }
+                                                        }
+                                                      },
+                                                    ),
+                                                  ],
+                                                ), // Row
+                                              ), // InkWell
+                                            ); // Container
+                                            },
+                                          );
+                                        },
+                                      ),
+                              )
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
                 // --- TOMBOL FITUR BARU (DI POJOK KANAN ATAS) ---
                 Positioned(
                   top: 20,
