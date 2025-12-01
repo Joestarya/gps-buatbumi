@@ -70,4 +70,17 @@ class GroupService {
       return false;
     }
   }
+
+  // FUNGSI 3: Ambil daftar member grup
+  Future<List<String>> getGroupMembers(String groupId) async {
+    try {
+      DocumentSnapshot doc = await _firestore.collection('groups').doc(groupId).get();
+      if (!doc.exists) return [];
+      GroupModel g = GroupModel.fromMap(doc.data() as Map<String, dynamic>);
+      return g.members;
+    } catch (e) {
+      print("Error getGroupMembers: $e");
+      return [];
+    }
+  }
 }

@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 // Import halaman yang sudah kita buat tadi
 import 'presentation/screens/auth/login_screen.dart';
 import 'presentation/screens/home/map_screen.dart';
+import 'presentation/search/place_search_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,9 @@ class GroupLocatorApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
+      routes: {
+        '/search': (ctx) => const PlaceSearchPage(),
+      },
       // Inilah "Satpam" aplikasi kita (StreamBuilder)
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),

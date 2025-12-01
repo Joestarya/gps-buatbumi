@@ -5,12 +5,15 @@ import 'package:latlong2/latlong.dart'; // Koordinat
 import 'package:geolocator/geolocator.dart'; // GPS
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/location_service.dart';
 import '../auth/login_screen.dart';
 import '../group/group_screen.dart';
+import '../../../data/tomtom_routing_service.dart';
+import '../../../config/tomtom_config.dart';
+import '../../../data/osm_search_service.dart';
+import '../../../data/meeting_repository.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -26,6 +29,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   
   // KONTROLER PETA (Untuk Fitur Kompas & Recenter)
   final MapController _mapController = MapController();
+  // PENCARIAN TEMPAT (TomTom Search)
+  final TextEditingController _searchController = TextEditingController();
+  final OsmSearchService _searchService = OsmSearchService();
+  final MeetingRepository _meetingRepo = MeetingRepository();
+  List<OsmPlace> _searchResults = [];
+  bool _searchLoading = false;
+  bool _searchOpen = false;
 
   LatLng? _myPosition;
   String? _myGroupId;
@@ -34,6 +44,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   StreamSubscription<Position>? _positionStream;
   String? _selectedUserId; // ID anggota yang dipilih dari legenda
   static const Distance _distanceCalc = Distance();
+  final TomTomRoutingService _routingService = TomTomRoutingService();
+  List<LatLng> _routePoints = [];
+  String? _routeInfo; // e.g. "1.2 km • 5 min"
+  bool _loadingRoute = false;
 
   String _formatDistance(double meters) {
     if (meters < 1) return "<1 m";
@@ -46,6 +60,38 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _initMapData();
+  }
+
+  Future<void> _navigateTo(LatLng target) async {
+    if (_myPosition == null) return;
+    setState(() {
+      _loadingRoute = true;
+      _routePoints = [];
+      _routeInfo = null;
+    });
+    final result = await _routingService.fetchRoute(_myPosition!, target);
+    if (!mounted) return;
+    setState(() {
+      _loadingRoute = false;
+      if (result != null && result.points.isNotEmpty) {
+        _routePoints = result.points;
+        final km = result.lengthMeters / 1000.0;
+        final minutes = (result.travelTimeSeconds / 60).round();
+        _routeInfo = '${km.toStringAsFixed(km < 10 ? 2 : 1)} km • ${minutes} min';
+        // Center map roughly between start & destination
+        final midIndex = result.points.length ~/ 2;
+        _mapController.move(result.points[midIndex], 14.5);
+      } else {
+        _routeInfo = 'Rute tidak ditemukan';
+      }
+    });
+  }
+
+  void _clearRoute() {
+    setState(() {
+      _routePoints = [];
+      _routeInfo = null;
+    });
   }
 
   void _initMapData() async {
@@ -110,6 +156,125 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _locationService.updateUserLocation(
           _myUid, position.latitude, position.longitude);
     });
+  }
+
+  Future<void> _performSearch() async {
+    final q = _searchController.text.trim();
+    if (q.isEmpty) {
+      setState(() => _searchResults = []);
+      return;
+    }
+    setState(() => _searchLoading = true);
+    try {
+      final res = await _searchService.search(q, limit: 10);
+      setState(() => _searchResults = res);
+    } finally {
+      if (mounted) setState(() => _searchLoading = false);
+    }
+  }
+
+  void _openInviteSheetForPlace(String groupId, OsmPlace place) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final Set<String> _selectedInvitees = {};
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.6,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  title: Text('Undang Teman ke: ${place.name}'),
+                  subtitle: const Text('Pilih anggota grup untuk diundang'),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .where('currentGroupId', isEqualTo: groupId)
+                        .snapshots(),
+                    builder: (ctx, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final docs = snapshot.data!.docs;
+                      if (docs.isEmpty) {
+                        return const Center(child: Text('Belum ada anggota di grup ini.'));
+                      }
+                      _selectedInvitees.clear();
+                      for (final d in docs) {
+                        final data = d.data() as Map<String, dynamic>;
+                        final uid = (data['uid'] ?? '').toString();
+                        if (uid.isNotEmpty && uid != user.uid) {
+                          _selectedInvitees.add(uid);
+                        }
+                      }
+                      return ListView.separated(
+                        itemCount: docs.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (ctx, i) {
+                          final data = docs[i].data() as Map<String, dynamic>;
+                          final uid = (data['uid'] ?? '').toString();
+                          final name = (data['name'] ?? 'Teman').toString();
+                          final isMe = uid == user.uid;
+                          final checked = _selectedInvitees.contains(uid);
+                          return CheckboxListTile(
+                            value: isMe ? false : checked,
+                            onChanged: isMe
+                                ? null
+                                : (v) {
+                                    setState(() {
+                                      if (v == true) {
+                                        _selectedInvitees.add(uid);
+                                      } else {
+                                        _selectedInvitees.remove(uid);
+                                      }
+                                    });
+                                  },
+                            title: Text(isMe ? '$name (Saya)' : name),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.send),
+                      label: const Text('Kirim Undangan'),
+                      onPressed: () async {
+                        final meetingId = await _meetingRepo.createMeeting(
+                          groupId: groupId,
+                          createdBy: user.uid,
+                          placeName: place.name,
+                          lat: place.lat,
+                          lon: place.lon,
+                          address: place.displayAddress,
+                        );
+                        await _meetingRepo.addInvites(meetingId, _selectedInvitees.toList());
+                        if (!mounted) return;
+                        Navigator.of(ctx).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Undangan terkirim.')),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _handleLogout() async {
@@ -196,9 +361,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      urlTemplate: 'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key={apiKey}',
+                      additionalOptions: {
+                        'apiKey': TomTomConfig.apiKey,
+                      },
                       userAgentPackageName: 'com.example.group_locator',
                     ),
+                    if (_routePoints.isNotEmpty)
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(points: _routePoints, strokeWidth: 5, color: Colors.deepPurpleAccent),
+                        ],
+                      ),
                     // MARKER SAYA
                     MarkerLayer(markers: [
                         if (_myPosition != null)
@@ -285,6 +459,74 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       ),
                   ],
                 ),
+                // Inline Search Bar (Top overlay)
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  right: 12,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Material(
+                        elevation: 2,
+                        borderRadius: BorderRadius.circular(12),
+                        child: TextField(
+                          controller: _searchController,
+                          onTap: () => setState(() => _searchOpen = true),
+                          onSubmitted: (_) => _performSearch(),
+                          decoration: InputDecoration(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            hintText: 'Cari tempat (TomTom)',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                            filled: true,
+                            fillColor: Colors.white,
+                            suffixIcon: IconButton(
+                              icon: _searchLoading
+                                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Icons.search),
+                              onPressed: _searchLoading ? null : _performSearch,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_searchOpen && _searchResults.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          constraints: const BoxConstraints(maxHeight: 260),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                          ),
+                          child: ListView.separated(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            shrinkWrap: true,
+                            itemCount: _searchResults.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (context, i) {
+                              final p = _searchResults[i];
+                              return ListTile(
+                                dense: true,
+                                title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text(p.displayAddress ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
+                                onTap: () {
+                                  setState(() {
+                                    _searchOpen = false;
+                                    _searchResults = [];
+                                  });
+                                  // Pindahkan kamera ke lokasi pilihan
+                                  _mapController.move(LatLng(p.lat, p.lon), 16.0);
+                                  if (_myGroupId != null) {
+                                    _openInviteSheetForPlace(_myGroupId!, p);
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
                 
 // --- PANEL ANGGOTA (Versi Bisa Buka/Tutup) ---
                 if (_myGroupId != null)
@@ -352,87 +594,82 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   borderRadius: BorderRadius.circular(18),
                                   boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
                                 ),
-                                child: Flexible(
-                                  child: memberIds.isEmpty
-                                      ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget..."))
-                                      : StreamBuilder<QuerySnapshot>(
-                                          stream: _locationService.streamUsersLocation(memberIds),
-                                          builder: (context, usersSnapshot) {
-                                            if (!usersSnapshot.hasData) return const Padding(padding: EdgeInsets.all(10), child: Center(child: CircularProgressIndicator()));
-                                            
-                                            final docs = usersSnapshot.data!.docs;
-                                            return ListView.separated(
-                                              padding: const EdgeInsets.all(12),
-                                              shrinkWrap: true,
-                                              itemCount: docs.length,
-                                              separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                              itemBuilder: (context, index) {
-                                                final data = docs[index].data() as Map<String, dynamic>;
-                                                final String name = (data['name'] ?? 'No Name').toString();
-                                                final bool isMe = data['uid']?.toString() == _myUid;
-                                                
-                                                return InkWell(
-                                                  onTap: () {
-                                                    if (data['latitude'] != null) {
-                                                      _mapController.move(LatLng(data['latitude'], data['longitude']), 16.0);
-                                                      setState(() => _selectedUserId = data['uid']);
-                                                    }
-                                                  },
-                                                  child: Row(
-                                                    children: [
-                                                      // Avatar Kecil
-                                                      Container(
-                                                        width: 32, height: 32,
-                                                        decoration: BoxDecoration(
-                                                          color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
-                                                          shape: BoxShape.circle,
-                                                          border: data['uid'] == _selectedUserId ? Border.all(color: Colors.blue, width: 2) : null,
-                                                        ),
-                                                        child: Center(
-                                                          child: Text(name.isNotEmpty ? name[0].toUpperCase() : "?", 
-                                                            style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? Colors.blue : Colors.black54)),
-                                                        ),
+                                child: memberIds.isEmpty
+                                    ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget..."))
+                                    : StreamBuilder<QuerySnapshot>(
+                                        stream: _locationService.streamUsersLocation(memberIds),
+                                        builder: (context, usersSnapshot) {
+                                          if (!usersSnapshot.hasData) return const Padding(padding: EdgeInsets.all(10), child: Center(child: CircularProgressIndicator()));
+                                          
+                                          final docs = usersSnapshot.data!.docs;
+                                          return ListView.separated(
+                                            padding: const EdgeInsets.all(12),
+                                            shrinkWrap: true,
+                                            itemCount: docs.length,
+                                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                            itemBuilder: (context, index) {
+                                              final data = docs[index].data() as Map<String, dynamic>;
+                                              final String name = (data['name'] ?? 'No Name').toString();
+                                              final bool isMe = data['uid']?.toString() == _myUid;
+                                              
+                                              return InkWell(
+                                                onTap: () {
+                                                  if (data['latitude'] != null) {
+                                                    _mapController.move(LatLng(data['latitude'], data['longitude']), 16.0);
+                                                    setState(() => _selectedUserId = data['uid']);
+                                                  }
+                                                },
+                                                child: Row(
+                                                  children: [
+                                                    // Avatar Kecil
+                                                    Container(
+                                                      width: 32, height: 32,
+                                                      decoration: BoxDecoration(
+                                                        color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
+                                                        shape: BoxShape.circle,
+                                                        border: data['uid'] == _selectedUserId ? Border.all(color: Colors.blue, width: 2) : null,
                                                       ),
-                                                      const SizedBox(width: 8),
-                                                      // Nama & Status
-                                                      Expanded(
-                                                        child: Column(
-                                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                                          children: [
-                                                            Text(isMe ? "$name (Saya)" : name, 
-                                                              style: TextStyle(fontSize: 12, fontWeight: isMe ? FontWeight.bold : FontWeight.normal),
-                                                              overflow: TextOverflow.ellipsis),
-                                                            if (_myPosition != null && data['latitude'] != null)
-                                                              Text(
-                                                                _formatDistance(_distanceCalc(_myPosition!, LatLng(data['latitude'], data['longitude']))),
-                                                                style: const TextStyle(fontSize: 10, color: Colors.grey),
-                                                              ),
-                                                          ],
-                                                        ),
+                                                      child: Center(
+                                                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : "?", 
+                                                          style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? Colors.blue : Colors.black54)),
                                                       ),
-                                                      // Tombol Navigasi
-                                                      if (!isMe && data['latitude'] != null) 
-                                                        IconButton(
-                                                          icon: const Icon(Icons.navigation, size: 18, color: Colors.blue),
-                                                          padding: EdgeInsets.zero,
-                                                          constraints: const BoxConstraints(),
-                                                          onPressed: () async {
-                                                            final double lat = (data['latitude'] as num).toDouble();
-                                                            final double lng = (data['longitude'] as num).toDouble();
-                                                            final Uri url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
-                                                            if (await canLaunchUrl(url)) {
-                                                              await launchUrl(url, mode: LaunchMode.externalApplication);
-                                                            }
-                                                          },
-                                                        ),
-                                                    ],
-                                                  ),
-                                                );
-                                              },
-                                            );
-                                          },
-                                        ),
-                                ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    // Nama & Status
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Text(isMe ? "$name (Saya)" : name, 
+                                                            style: TextStyle(fontSize: 12, fontWeight: isMe ? FontWeight.bold : FontWeight.normal),
+                                                            overflow: TextOverflow.ellipsis),
+                                                          if (_myPosition != null && data['latitude'] != null)
+                                                            Text(
+                                                              _formatDistance(_distanceCalc(_myPosition!, LatLng(data['latitude'], data['longitude']))),
+                                                              style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    // Tombol Navigasi
+                                                    if (!isMe && data['latitude'] != null) 
+                                                      IconButton(
+                                                        icon: const Icon(Icons.navigation, size: 18, color: Colors.blue),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () async {
+                                                          final double lat = (data['latitude'] as num).toDouble();
+                                                          final double lng = (data['longitude'] as num).toDouble();
+                                                          await _navigateTo(LatLng(lat, lng));
+                                                        },
+                                                      ),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
                               ),
                           ],
                         );
@@ -446,6 +683,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   right: 20,
                   child: Column(
                     children: [
+                      // Tombol Pencarian Tempat OSM
+                      FloatingActionButton.small(
+                        heroTag: "btnSearchOSM",
+                        onPressed: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const PlaceSearchOsmScreen()));
+                        },
+                        backgroundColor: Colors.white,
+                        child: const Icon(Icons.search, color: Colors.blue),
+                      ),
+                      const SizedBox(height: 10),
                       // Tombol Kompas
                       FloatingActionButton.small(
                         heroTag: "btnCompass",
@@ -461,9 +708,52 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         backgroundColor: Colors.white,
                         child: const Icon(Icons.my_location, color: Colors.blue),
                       ),
+                      const SizedBox(height: 10),
                     ],
                   ),
                 ),
+                if (_loadingRoute)
+                  const Positioned(
+                    top: 12,
+                    left: 12,
+                    child: Card(
+                      elevation: 4,
+                      child: Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Row(
+                          children: [
+                            SizedBox(height:16,width:16,child:CircularProgressIndicator(strokeWidth:2)),
+                            SizedBox(width:8),
+                            Text('Mengambil rute...'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_routeInfo != null && !_loadingRoute)
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: Card(
+                      elevation: 4,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.directions, color: Colors.deepPurpleAccent),
+                            const SizedBox(width: 8),
+                            Text(_routeInfo!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 12),
+                            InkWell(
+                              onTap: _clearRoute,
+                              child: const Icon(Icons.close, size: 18),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
       floatingActionButton: FloatingActionButton.extended(
