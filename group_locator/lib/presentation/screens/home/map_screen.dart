@@ -477,7 +477,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           onSubmitted: (_) => _performSearch(),
                           decoration: InputDecoration(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            hintText: 'Cari tempat (TomTom)',
+                            hintText: 'Cari tempat',
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                             filled: true,
                             fillColor: Colors.white,
