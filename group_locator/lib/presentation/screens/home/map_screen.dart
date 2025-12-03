@@ -14,6 +14,7 @@ import '../../../data/tomtom_routing_service.dart';
 import '../../../config/tomtom_config.dart';
 import '../../../data/osm_search_service.dart';
 import '../../../data/meeting_repository.dart';
+import 'place_search_osm_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -687,7 +688,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       FloatingActionButton.small(
                         heroTag: "btnSearchOSM",
                         onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const PlaceSearchOsmScreen()));
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => PlaceSearchOsmScreen(),
+                            ),
+                          );
                         },
                         backgroundColor: Colors.white,
                         child: const Icon(Icons.search, color: Colors.blue),
