@@ -14,7 +14,6 @@ import '../../../data/tomtom_routing_service.dart';
 import '../../../config/tomtom_config.dart';
 import '../../../data/osm_search_service.dart';
 import '../../../data/meeting_repository.dart';
-import 'place_search_osm_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -32,6 +31,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   // PENCARIAN TEMPAT (TomTom Search)
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _statusController = TextEditingController();
   final OsmSearchService _searchService = OsmSearchService();
   final MeetingRepository _meetingRepo = MeetingRepository();
   List<OsmPlace> _searchResults = [];
@@ -40,8 +40,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   LatLng? _myPosition;
   String? _myGroupId;
+  String? _myGroupName;
+  String? _myStatus;
   bool _isLoading = true;
   bool _isMemberListOpen = false;
+  bool _isMeetingListOpen = false;
   StreamSubscription<Position>? _positionStream;
   String? _selectedUserId; // ID anggota yang dipilih dari legenda
   static const Distance _distanceCalc = Distance();
@@ -95,6 +98,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     });
   }
 
+  void _updateStatus() async {
+    String status = _statusController.text.trim();
+    if (status.isNotEmpty) {
+      await _locationService.updateUserStatus(_myUid, status);
+      setState(() {
+        _myStatus = status;
+      });
+      _statusController.clear();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Status berhasil diperbarui')),
+      );
+    }
+  }
+
   void _initMapData() async {
     // 1. Cari & Upload Lokasi Awal (Force Update biar Laptop bisa lihat HP)
     await _checkPermissionsAndLocate();
@@ -104,6 +122,26 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     setState(() {
       _myGroupId = groupId;
     });
+
+    // Ambil nama grup jika ada
+    if (groupId != null) {
+      DocumentSnapshot groupDoc = await FirebaseFirestore.instance.collection('groups').doc(groupId).get();
+      if (groupDoc.exists) {
+        Map<String, dynamic> data = groupDoc.data() as Map<String, dynamic>;
+        setState(() {
+          _myGroupName = data['name'] ?? 'Tanpa Nama';
+        });
+      }
+    }
+
+    // Ambil status saya
+    DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(_myUid).get();
+    if (userDoc.exists) {
+      Map<String, dynamic> data = userDoc.data() as Map<String, dynamic>;
+      setState(() {
+        _myStatus = data['status'];
+      });
+    }
 
     // 3. Mulai pantau pergerakan realtime
     _listenToMyMovement();
@@ -177,7 +215,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   void _openInviteSheetForPlace(String groupId, OsmPlace place) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    final Set<String> _selectedInvitees = {};
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -185,66 +222,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         return Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: SizedBox(
-            height: MediaQuery.of(ctx).size.height * 0.6,
+            height: MediaQuery.of(ctx).size.height * 0.3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ListTile(
-                  title: Text('Undang Teman ke: ${place.name}'),
-                  subtitle: const Text('Pilih anggota grup untuk diundang'),
+                  title: Text('Undang ke: ${place.name}'),
+                  subtitle: const Text('Kirim undangan ke semua anggota grup'),
                 ),
-                const Divider(height: 1),
-                Expanded(
-                  child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('users')
-                        .where('currentGroupId', isEqualTo: groupId)
-                        .snapshots(),
-                    builder: (ctx, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final docs = snapshot.data!.docs;
-                      if (docs.isEmpty) {
-                        return const Center(child: Text('Belum ada anggota di grup ini.'));
-                      }
-                      _selectedInvitees.clear();
-                      for (final d in docs) {
-                        final data = d.data() as Map<String, dynamic>;
-                        final uid = (data['uid'] ?? '').toString();
-                        if (uid.isNotEmpty && uid != user.uid) {
-                          _selectedInvitees.add(uid);
-                        }
-                      }
-                      return ListView.separated(
-                        itemCount: docs.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (ctx, i) {
-                          final data = docs[i].data() as Map<String, dynamic>;
-                          final uid = (data['uid'] ?? '').toString();
-                          final name = (data['name'] ?? 'Teman').toString();
-                          final isMe = uid == user.uid;
-                          final checked = _selectedInvitees.contains(uid);
-                          return CheckboxListTile(
-                            value: isMe ? false : checked,
-                            onChanged: isMe
-                                ? null
-                                : (v) {
-                                    setState(() {
-                                      if (v == true) {
-                                        _selectedInvitees.add(uid);
-                                      } else {
-                                        _selectedInvitees.remove(uid);
-                                      }
-                                    });
-                                  },
-                            title: Text(isMe ? '$name (Saya)' : name),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
+                const Spacer(),
                 SafeArea(
                   child: Padding(
                     padding: const EdgeInsets.all(12.0),
@@ -252,6 +238,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       icon: const Icon(Icons.send),
                       label: const Text('Kirim Undangan'),
                       onPressed: () async {
+                        // Get all members
+                        final groupDoc = await FirebaseFirestore.instance.collection('groups').doc(groupId).get();
+                        if (!groupDoc.exists) return;
+                        final groupData = groupDoc.data() as Map<String, dynamic>;
+                        final members = List<String>.from(groupData['members'] ?? []);
+                        members.remove(user.uid); // Don't invite self
+
                         final meetingId = await _meetingRepo.createMeeting(
                           groupId: groupId,
                           createdBy: user.uid,
@@ -260,7 +253,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           lon: place.lon,
                           address: place.displayAddress,
                         );
-                        await _meetingRepo.addInvites(meetingId, _selectedInvitees.toList());
+                        await _meetingRepo.addInvites(meetingId, members);
                         if (!mounted) return;
                         Navigator.of(ctx).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -337,7 +330,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_myGroupId == null ? "Belum Ada Grup" : "Grup: $_myGroupId"),
+        title: Text(_myGroupId == null ? "Belum Ada Grup" : "Grup: $_myGroupName"),
         actions: [
           IconButton(
           icon: const Icon(Icons.logout),
@@ -379,10 +372,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         if (_myPosition != null)
                           Marker(
                             point: _myPosition!,
-                            width: 80, height: 80,
-                            child: const Column(children: [
-                                Icon(Icons.navigation, color: Colors.red, size: 40), // Ganti icon panah biar keren
-                                Text("Saya", style: TextStyle(fontWeight: FontWeight.bold)),
+                            width: 80, height: 100,
+                            child: Column(children: [
+                                const Icon(Icons.navigation, color: Colors.red, size: 40), // Ganti icon panah biar keren
+                                const Text("Saya", style: TextStyle(fontWeight: FontWeight.bold)),
+                                if (_myStatus != null && _myStatus!.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.red, width: 1),
+                                    ),
+                                    child: Text(
+                                      _myStatus!,
+                                      style: const TextStyle(fontSize: 8, color: Colors.black),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ),
                             ]),
                           ),
                     ]),
@@ -439,14 +447,28 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                               borderRadius: BorderRadius.circular(6),
                                               border: isSelected ? Border.all(color: Colors.deepPurple, width: 1) : null,
                                             ),
-                                            child: Text(
-                                              data['name'] ?? "Teman",
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                                color: isSelected ? Colors.deepPurple : Colors.black,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
+                                            child: Column(
+                                              children: [
+                                                Text(
+                                                  data['name'] ?? "Teman",
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isSelected ? Colors.deepPurple : Colors.black,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                if (data['status'] != null && data['status'].toString().isNotEmpty)
+                                                  Text(
+                                                    data['status'],
+                                                    style: TextStyle(
+                                                      fontSize: 8,
+                                                      color: isSelected ? Colors.deepPurple.shade700 : Colors.grey[600],
+                                                    ),
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                  ),
+                                              ],
                                             ),
                                           ),
                                       ]),
@@ -456,6 +478,57 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                               return MarkerLayer(markers: friendMarkers);
                             },
                           );
+                        },
+                      ),
+                    // MARKER MEETING
+                    if (_myGroupId != null)
+                      StreamBuilder<QuerySnapshot>(
+                        stream: _meetingRepo.streamMeetingsByGroup(_myGroupId!),
+                        builder: (context, meetingSnapshot) {
+                          if (!meetingSnapshot.hasData) return const SizedBox();
+                          List<Marker> meetingMarkers = [];
+                          for (var doc in meetingSnapshot.data!.docs) {
+                            var data = doc.data() as Map<String, dynamic>;
+                            if (data['lat'] != null && data['lon'] != null) {
+                              meetingMarkers.add(Marker(
+                                point: LatLng(data['lat'], data['lon']),
+                                width: 100,
+                                height: 80,
+                                child: Column(children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.green,
+                                    ),
+                                    child: const Icon(
+                                      Icons.location_on,
+                                      color: Colors.white,
+                                      size: 40,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.green, width: 1),
+                                    ),
+                                    child: Text(
+                                      data['placeName'] ?? 'Meeting',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ]),
+                              ));
+                            }
+                          }
+                          return MarkerLayer(markers: meetingMarkers);
                         },
                       ),
                   ],
@@ -678,27 +751,170 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     ),
                   ),
 
+                // --- PANEL MEETINGS ---
+                if (_myGroupId != null)
+                  Positioned(
+                    right: 12,
+                    top: 400, // Sesuaikan posisi agar tidak nabrak panel anggota
+                    child: StreamBuilder<DocumentSnapshot>(
+                      stream: _locationService.streamGroupData(_myGroupId!),
+                      builder: (context, groupSnapshot) {
+                        if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
+                          return const SizedBox();
+                        }
+                        final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
+                        final String adminId = groupData['adminId'] ?? '';
+                        final bool isAdmin = adminId == _myUid;
+
+                        return StreamBuilder<QuerySnapshot>(
+                          stream: _meetingRepo.streamMeetingsByGroup(_myGroupId!),
+                          builder: (context, meetingSnapshot) {
+                            if (!meetingSnapshot.hasData) return const SizedBox();
+                            final meetings = meetingSnapshot.data!.docs;
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                // 1. TOMBOL HEADER
+                                InkWell(
+                                  onTap: () {
+                                    setState(() {
+                                      _isMeetingListOpen = !_isMeetingListOpen;
+                                    });
+                                  },
+                                  child: Container(
+                                    height: 45,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(25),
+                                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.location_on, color: Colors.green),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          "Meetings (${meetings.length})",
+                                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Icon(
+                                          _isMeetingListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                          color: Colors.grey,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                                const SizedBox(height: 8),
+
+                                // 2. DAFTAR MEETINGS
+                                if (_isMeetingListOpen)
+                                  Container(
+                                    width: 200,
+                                    constraints: const BoxConstraints(maxHeight: 250),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.95),
+                                      borderRadius: BorderRadius.circular(18),
+                                      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                                    ),
+                                    child: meetings.isEmpty
+                                        ? const Padding(padding: EdgeInsets.all(12), child: Text("Belum ada meeting"))
+                                        : ListView.separated(
+                                            padding: const EdgeInsets.all(12),
+                                            shrinkWrap: true,
+                                            itemCount: meetings.length,
+                                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                            itemBuilder: (context, index) {
+                                              final data = meetings[index].data() as Map<String, dynamic>;
+                                              final placeName = data['placeName'] ?? 'Unknown';
+                                              final lat = data['lat'];
+                                              final lon = data['lon'];
+                                              final meetingId = meetings[index].id;
+                                              return InkWell(
+                                                onTap: () {
+                                                  if (lat != null && lon != null) {
+                                                    _mapController.move(LatLng(lat, lon), 16.0);
+                                                  }
+                                                },
+                                                child: Row(
+                                                  children: [
+                                                    Container(
+                                                      width: 32, height: 32,
+                                                      decoration: const BoxDecoration(
+                                                        color: Colors.green,
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                      child: const Icon(Icons.location_on, color: Colors.white, size: 20),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Text(placeName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                          if (_myPosition != null && lat != null && lon != null)
+                                                            Text(
+                                                              _formatDistance(_distanceCalc(_myPosition!, LatLng(lat, lon))),
+                                                              style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    if (lat != null && lon != null)
+                                                      IconButton(
+                                                        icon: const Icon(Icons.navigation, size: 18, color: Colors.green),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () async {
+                                                          await _navigateTo(LatLng(lat, lon));
+                                                        },
+                                                      ),
+                                                    if (isAdmin)
+                                                      IconButton(
+                                                        icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () async {
+                                                          bool? confirm = await showDialog<bool>(
+                                                            context: context,
+                                                            builder: (context) => AlertDialog(
+                                                              title: const Text('Hapus Meeting'),
+                                                              content: Text('Apakah Anda yakin ingin menghapus meeting "$placeName"?'),
+                                                              actions: [
+                                                                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+                                                                TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Hapus')),
+                                                              ],
+                                                            ),
+                                                          );
+                                                          if (confirm == true) {
+                                                            await _meetingRepo.deleteMeeting(meetingId);
+                                                          }
+                                                        },
+                                                      ),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                  ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+
                 // --- TOMBOL FITUR BARU (DI POJOK KANAN ATAS) ---
                 Positioned(
                   top: 20,
                   right: 20,
                   child: Column(
                     children: [
-                      // Tombol Pencarian Tempat OSM
-                      FloatingActionButton.small(
-                        heroTag: "btnSearchOSM",
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => PlaceSearchOsmScreen(),
-                            ),
-                          );
-                        },
-                        backgroundColor: Colors.white,
-                        child: const Icon(Icons.search, color: Colors.blue),
-                      ),
-                      const SizedBox(height: 10),
                       // Tombol Kompas
                       FloatingActionButton.small(
                         heroTag: "btnCompass",
@@ -762,13 +978,51 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(context, MaterialPageRoute(builder: (context) => const GroupScreen()))
-              .then((_) => _initMapData());
-        },
-        label: const Text("Menu Grup"),
-        icon: const Icon(Icons.group),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Update Status'),
+                  content: TextField(
+                    controller: _statusController,
+                    decoration: const InputDecoration(hintText: 'Tulis status Anda'),
+                    maxLength: 50,
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Batal'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        _updateStatus();
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Update'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            label: const Text("Status"),
+            icon: const Icon(Icons.edit),
+            heroTag: "statusBtn",
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const GroupScreen()))
+                  .then((_) => _initMapData());
+            },
+            label: const Text("Menu Grup"),
+            icon: const Icon(Icons.group),
+            heroTag: "groupBtn",
+          ),
+        ],
       ),
     );
   }

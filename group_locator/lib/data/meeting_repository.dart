@@ -39,4 +39,12 @@ class MeetingRepository {
     }
     await batch.commit();
   }
+
+  Stream<QuerySnapshot> streamMeetingsByGroup(String groupId) {
+    return _db.collection('meetings').where('groupId', isEqualTo: groupId).snapshots();
+  }
+
+  Future<void> deleteMeeting(String meetingId) async {
+    await _db.collection('meetings').doc(meetingId).delete();
+  }
 }

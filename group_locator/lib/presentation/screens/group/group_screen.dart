@@ -19,6 +19,7 @@ class _GroupScreenState extends State<GroupScreen> {
   final String _currentUserId = FirebaseAuth.instance.currentUser!.uid;
   bool _isLoading = false;
   String? _myGroupId;
+  List<String> _joinedGroups = [];
 
   @override
   void initState() {
@@ -28,8 +29,12 @@ class _GroupScreenState extends State<GroupScreen> {
 
   Future<void> _loadMyGroup() async {
     String? groupId = await _locationService.findMyGroupId(_currentUserId);
+    List<String> joined = await _groupService.getJoinedGroups(_currentUserId);
     if (!mounted) return;
-    setState(() => _myGroupId = groupId);
+    setState(() {
+      _myGroupId = groupId;
+      _joinedGroups = joined;
+    });
   }
 
   // --- LOGIKA BUAT GRUP ---
@@ -56,6 +61,8 @@ class _GroupScreenState extends State<GroupScreen> {
       _groupNameController.clear();
       
       _showSuccessDialog("Grup Berhasil Dibuat!", "Kode Grup kamu:\n\n$groupId\n\n(Kode ini hasil generate baru)");
+      // Reload data
+      await _loadMyGroup();
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,12 +83,130 @@ class _GroupScreenState extends State<GroupScreen> {
       if (!mounted) return;
       _groupIdController.clear(); // Kosongkan input
       _showSuccessDialog("Berhasil Join!", "Kamu sekarang sudah tergabung di grup $groupIdInput.");
+      // Reload data
+      await _loadMyGroup();
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Gagal join. Cek kode grupnya.')),
       );
     }
+  }
+
+  void _handleSwitchGroup(String groupId) async {
+    setState(() => _isLoading = true);
+    bool success = await _groupService.switchGroup(_currentUserId, groupId);
+    setState(() => _isLoading = false);
+
+    if (success) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Berhasil switch ke grup $groupId')),
+      );
+      // Reload data
+      await _loadMyGroup();
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal switch grup.')),
+      );
+    }
+  }
+
+  void _handleLeaveGroup(String groupId) async {
+    setState(() => _isLoading = true);
+    bool success = await _groupService.leaveGroup(groupId, _currentUserId);
+    setState(() => _isLoading = false);
+
+    if (success) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Berhasil keluar dari grup $groupId')),
+      );
+      // Reload data
+      await _loadMyGroup();
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal keluar dari grup.')),
+      );
+    }
+  }
+
+  void _handleRemoveMember(String groupId, String memberId, String memberName) async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Konfirmasi'),
+        content: Text('Apakah Anda yakin ingin mengeluarkan $memberName dari grup?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Ya')),
+        ],
+      ),
+    ) ?? false;
+
+    if (!confirm) return;
+
+    setState(() => _isLoading = true);
+    bool success = await _groupService.removeMember(groupId, _currentUserId, memberId);
+    setState(() => _isLoading = false);
+
+    if (success) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$memberName berhasil dikeluarkan dari grup')),
+      );
+      // Reload data
+      await _loadMyGroup();
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal mengeluarkan anggota.')),
+      );
+    }
+  }
+
+  void _showMembersDialog(String groupId, String groupName, List<String> members, String adminId) async {
+    bool isAdmin = adminId == _currentUserId;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Anggota Grup $groupName'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: members.length,
+            itemBuilder: (context, index) {
+              String memberId = members[index];
+              return FutureBuilder<String>(
+                future: _groupService.getUserName(memberId),
+                builder: (context, snapshot) {
+                  String name = snapshot.data ?? 'Loading...';
+                  bool isCurrentUser = memberId == _currentUserId;
+                  bool isGroupAdmin = memberId == adminId;
+                  return ListTile(
+                    title: Text(name),
+                    subtitle: Text(isGroupAdmin ? 'Admin' : 'Anggota'),
+                    trailing: isAdmin && !isCurrentUser && !isGroupAdmin
+                        ? IconButton(
+                            icon: const Icon(Icons.remove_circle, color: Colors.red),
+                            onPressed: () => _handleRemoveMember(groupId, memberId, name),
+                          )
+                        : null,
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
+        ],
+      ),
+    );
   }
 
   void _showSuccessDialog(String title, String content) {
@@ -142,62 +267,65 @@ class _GroupScreenState extends State<GroupScreen> {
                     child: const Text("GABUNG GRUP"),
                   ),
                   const Divider(height: 50, thickness: 2),
-                  const Text("Anggota Grup Saya", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text("Grup tersedia", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  if (_myGroupId == null)
+                  if (_joinedGroups.isEmpty)
                     const Text("Kamu belum tergabung di grup manapun.")
                   else
-                    StreamBuilder<DocumentSnapshot>(
-                      stream: _locationService.streamGroupData(_myGroupId!),
-                      builder: (context, groupSnapshot) {
-                        if (groupSnapshot.connectionState == ConnectionState.waiting) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-                        if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) {
-                          return const Text("Data grup tidak ditemukan.");
-                        }
-                        final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
-                        final List<dynamic> memberIdsDyn = groupData['members'] ?? [];
-                        final List<String> memberIds = memberIdsDyn.map((e) => e.toString()).toList();
-
-                        if (memberIds.isEmpty) {
-                          return const Text("Belum ada anggota.");
-                        }
-
-                        return StreamBuilder<QuerySnapshot>(
-                          stream: _locationService.streamUsersLocation(memberIds),
-                          builder: (context, usersSnapshot) {
-                            if (usersSnapshot.connectionState == ConnectionState.waiting) {
-                              return const Center(child: CircularProgressIndicator());
+                    ListView.builder(
+                      physics: const NeverScrollableScrollPhysics(),
+                      shrinkWrap: true,
+                      itemCount: _joinedGroups.length,
+                      itemBuilder: (context, index) {
+                        String groupId = _joinedGroups[index];
+                        bool isActive = groupId == _myGroupId;
+                        return FutureBuilder<DocumentSnapshot>(
+                          future: _locationService.streamGroupData(groupId).first,
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData || !snapshot.data!.exists) {
+                              return ListTile(
+                                title: Text('Grup $groupId'),
+                                subtitle: const Text('Data tidak ditemukan'),
+                              );
                             }
-                            if (!usersSnapshot.hasData) {
-                              return const Text("Tidak dapat memuat anggota.");
-                            }
-
-                            final docs = usersSnapshot.data!.docs;
-                            return ListView.separated(
-                              physics: const NeverScrollableScrollPhysics(),
-                              shrinkWrap: true,
-                              itemCount: docs.length,
-                              separatorBuilder: (_, __) => const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final data = docs[index].data() as Map<String, dynamic>;
-                                final String name = (data['name'] ?? 'Tanpa Nama').toString();
-                                final String email = (data['email'] ?? '').toString();
-                                final String? photoUrl = data['photoUrl'] as String?;
-                                final bool isAdmin = (groupData['adminId']?.toString() ?? '') == data['uid']?.toString();
-
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundImage: photoUrl != null && photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-                                    child: (photoUrl == null || photoUrl.isEmpty)
-                                        ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?')
-                                        : null,
-                                  ),
-                                  title: Text(name),
-                                  subtitle: Text(isAdmin ? "$email • Admin" : email),
-                                );
-                              },
+                            Map<String, dynamic> data = snapshot.data!.data() as Map<String, dynamic>;
+                            String name = data['name'] ?? 'Tanpa Nama';
+                            String adminId = data['adminId'] ?? '';
+                            List<String> members = List<String>.from(data['members'] ?? []);
+                            return ListTile(
+                              title: Text(name),
+                              subtitle: Text('ID: $groupId${isActive ? ' (Aktif)' : ''}'),
+                              trailing: isActive
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        ElevatedButton(
+                                          onPressed: () => _showMembersDialog(groupId, name, members, adminId),
+                                          child: const Text('Anggota'),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ElevatedButton(
+                                          onPressed: () => _handleLeaveGroup(groupId),
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                          child: const Text('Keluar'),
+                                        ),
+                                      ],
+                                    )
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        ElevatedButton(
+                                          onPressed: () => _handleSwitchGroup(groupId),
+                                          child: const Text('Buka'),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ElevatedButton(
+                                          onPressed: () => _handleLeaveGroup(groupId),
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                          child: const Text('Keluar'),
+                                        ),
+                                      ],
+                                    ),
                             );
                           },
                         );

@@ -20,6 +20,18 @@ class LocationService {
     }
   }
 
+  // UPDATE STATUS
+  Future<void> updateUserStatus(String uid, String status) async {
+    try {
+      await _firestore.collection('users').doc(uid).set({
+        'status': status,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print("Error update status: $e");
+    }
+  }
+
   // 2. CARI GROUP ID (KODE BARU: LEBIH AKURAT)
   // Kita ambil langsung dari field 'currentGroupId' di data user
   Future<String?> findMyGroupId(String uid) async {
