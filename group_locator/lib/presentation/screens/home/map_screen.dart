@@ -504,7 +504,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     child: const Icon(
                                       Icons.location_on,
                                       color: Colors.white,
-                                      size: 30,
+                                      size: 40,
                                     ),
                                   ),
                                   Container(
@@ -535,51 +535,45 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
                 // Inline Search Bar (Top overlay)
                 Positioned(
-                  top: 8,
-                  left: 8,
-                  right: 60,
+                  top: 12,
+                  left: 12,
+                  right: 12,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Material(
                         elevation: 2,
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(12),
                         child: TextField(
                           controller: _searchController,
                           onTap: () => setState(() => _searchOpen = true),
                           onSubmitted: (_) => _performSearch(),
                           decoration: InputDecoration(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             hintText: 'Cari tempat',
-                            hintStyle: const TextStyle(fontSize: 13),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                             filled: true,
                             fillColor: Colors.white,
-                            isDense: true,
-                            suffixIcon: Padding(
-                              padding: const EdgeInsets.all(4.0),
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                icon: _searchLoading
-                                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Icon(Icons.search, size: 20),
-                                onPressed: _searchLoading ? null : _performSearch,
-                              ),
+                            suffixIcon: IconButton(
+                              icon: _searchLoading
+                                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Icons.search),
+                              onPressed: _searchLoading ? null : _performSearch,
                             ),
                           ),
                         ),
                       ),
                       if (_searchOpen && _searchResults.isNotEmpty)
                         Container(
-                          margin: const EdgeInsets.only(top: 4),
-                          constraints: const BoxConstraints(maxHeight: 200),
+                          margin: const EdgeInsets.only(top: 8),
+                          constraints: const BoxConstraints(maxHeight: 260),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(12),
                             boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
                           ),
                           child: ListView.separated(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
                             shrinkWrap: true,
                             itemCount: _searchResults.length,
                             separatorBuilder: (_, __) => const Divider(height: 1),
@@ -587,9 +581,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                               final p = _searchResults[i];
                               return ListTile(
                                 dense: true,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
-                                subtitle: Text(p.displayAddress ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                                title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text(p.displayAddress ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
                                 onTap: () {
                                   setState(() {
                                     _searchOpen = false;
@@ -612,8 +605,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 // --- PANEL ANGGOTA (Versi Bisa Buka/Tutup) ---
                 if (_myGroupId != null)
                   Positioned(
-                    right: 8,
-                    bottom: 70, // Posisi dari bawah untuk menghindari FAB
+                    right: 12,
+                    top: 170, // Turunkan ke 170 biar GAK NABRAK tombol kompas
                     child: StreamBuilder<DocumentSnapshot>(
                       stream: _locationService.streamGroupData(_myGroupId!),
                       builder: (context, groupSnapshot) {
@@ -636,59 +629,58 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 });
                               },
                               child: Container(
-                                height: 40,
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                height: 45,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20), // Bulat lonjong
+                                  borderRadius: BorderRadius.circular(25), // Bulat lonjong
                                   boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min, // Lebar menyesuaikan isi
                                   children: [
-                                    const Icon(Icons.people, color: Colors.blue, size: 18),
-                                    const SizedBox(width: 6),
+                                    const Icon(Icons.people, color: Colors.blue),
+                                    const SizedBox(width: 8),
                                     Text(
                                       "Anggota (${memberIds.length})", 
-                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 12)
+                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)
                                     ),
-                                    const SizedBox(width: 4),
+                                    const SizedBox(width: 8),
                                     // Panah indikator (Atas/Bawah)
                                     Icon(
                                       _isMemberListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                                       color: Colors.grey,
-                                      size: 18,
                                     ),
                                   ],
                                 ),
                               ),
                             ),
 
-                            const SizedBox(height: 6), // Jarak antara tombol dan list
+                            const SizedBox(height: 8), // Jarak antara tombol dan list
 
                             // 2. DAFTAR MEMBER (Cuma Muncul Kalau _isMemberListOpen == true)
                             if (_isMemberListOpen)
                               Container(
-                                width: 180,
-                                constraints: const BoxConstraints(maxHeight: 200), // Batasi tinggi
+                                width: 200,
+                                constraints: const BoxConstraints(maxHeight: 250), // Batasi tinggi
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.97),
-                                  borderRadius: BorderRadius.circular(14),
+                                  color: Colors.white.withOpacity(0.95),
+                                  borderRadius: BorderRadius.circular(18),
                                   boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
                                 ),
                                 child: memberIds.isEmpty
-                                    ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget...", style: TextStyle(fontSize: 12)))
+                                    ? const Padding(padding: EdgeInsets.all(12), child: Text("Sepi banget..."))
                                     : StreamBuilder<QuerySnapshot>(
                                         stream: _locationService.streamUsersLocation(memberIds),
                                         builder: (context, usersSnapshot) {
-                                          if (!usersSnapshot.hasData) return const Padding(padding: EdgeInsets.all(10), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+                                          if (!usersSnapshot.hasData) return const Padding(padding: EdgeInsets.all(10), child: Center(child: CircularProgressIndicator()));
                                           
                                           final docs = usersSnapshot.data!.docs;
                                           return ListView.separated(
-                                            padding: const EdgeInsets.all(8),
+                                            padding: const EdgeInsets.all(12),
                                             shrinkWrap: true,
                                             itemCount: docs.length,
-                                            separatorBuilder: (_, __) => const Divider(height: 1),
+                                            separatorBuilder: (_, __) => const SizedBox(height: 8),
                                             itemBuilder: (context, index) {
                                               final data = docs[index].data() as Map<String, dynamic>;
                                               final String name = (data['name'] ?? 'No Name').toString();
@@ -701,13 +693,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                                     setState(() => _selectedUserId = data['uid']);
                                                   }
                                                 },
-                                                child: Padding(
-                                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                                                  child: Row(
-                                                    children: [
-                                                      // Avatar Kecil
-                                                      Container(
-                                                        width: 28, height: 28,
+                                                child: Row(
+                                                  children: [
+                                                    // Avatar Kecil
+                                                    Container(
+                                                      width: 32, height: 32,
                                                       decoration: BoxDecoration(
                                                         color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
                                                         shape: BoxShape.circle,
@@ -749,7 +739,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                                       ),
                                                   ],
                                                 ),
-                                               ) );
+                                              );
                                             },
                                           );
                                         },
@@ -764,8 +754,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 // --- PANEL MEETINGS ---
                 if (_myGroupId != null)
                   Positioned(
-                    right: 8,
-                    bottom: 20, // Posisi dari bawah untuk menghindari FAB
+                    right: 12,
+                    top: 400, // Sesuaikan posisi agar tidak nabrak panel anggota
                     child: StreamBuilder<DocumentSnapshot>(
                       stream: _locationService.streamGroupData(_myGroupId!),
                       builder: (context, groupSnapshot) {
@@ -793,27 +783,23 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     });
                                   },
                                   child: Container(
-                                  height: 40,
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20), // Bulat lonjong
-                                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                                ),
+                                    height: 45,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(25),
+                                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                                    ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         const Icon(Icons.location_on, color: Colors.green),
-                                        const SizedBox(width: 6),
+                                        const SizedBox(width: 8),
                                         Text(
                                           "Meetings (${meetings.length})",
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold, 
-                                            color: Colors.black87,
-                                            fontSize: 12.0, // <--- Tambahkan baris ini. Coba ubah angkanya (misal 10.0 atau 11.0)
-                                          )
+                                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)
                                         ),
-                                        const SizedBox(width: 6),
+                                        const SizedBox(width: 8),
                                         Icon(
                                           _isMeetingListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                                           color: Colors.grey,
@@ -823,7 +809,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   ),
                                 ),
 
-                                const SizedBox(height: 6),
+                                const SizedBox(height: 8),
 
                                 // 2. DAFTAR MEETINGS
                                 if (_isMeetingListOpen)
@@ -925,8 +911,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
                 // --- TOMBOL FITUR BARU (DI POJOK KANAN ATAS) ---
                 Positioned(
-                  top: 8,
-                  right: 8,
+                  top: 20,
+                  right: 20,
                   child: Column(
                     children: [
                       // Tombol Kompas
@@ -934,18 +920,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         heroTag: "btnCompass",
                         onPressed: _resetNorth,
                         backgroundColor: Colors.white,
-                        elevation: 4,
-                        child: const Icon(Icons.explore, color: Colors.blue, size: 20),
+                        child: const Icon(Icons.explore, color: Colors.blue),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       // Tombol Recenter
                       FloatingActionButton.small(
                         heroTag: "btnRecenter",
                         onPressed: _recenterPosition,
                         backgroundColor: Colors.white,
-                        elevation: 4,
-                        child: const Icon(Icons.my_location, color: Colors.blue, size: 20),
+                        child: const Icon(Icons.my_location, color: Colors.blue),
                       ),
+                      const SizedBox(height: 10),
                     ],
                   ),
                 ),
@@ -993,178 +978,52 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
               ],
             ),
-      floatingActionButton: Stack(
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          Positioned(
-            bottom: 80,
-            left: 16,
-            child: FloatingActionButton.small(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Update Status'),
-                    content: TextField(
-                      controller: _statusController,
-                      decoration: const InputDecoration(hintText: 'Tulis status Anda'),
-                      maxLength: 50,
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Batal'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          _updateStatus();
-                          Navigator.pop(context);
-                        },
-                        child: const Text('Update'),
-                      ),
-                    ],
+          FloatingActionButton.extended(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Update Status'),
+                  content: TextField(
+                    controller: _statusController,
+                    decoration: const InputDecoration(hintText: 'Tulis status Anda'),
+                    maxLength: 50,
                   ),
-                );
-              },
-              backgroundColor: Colors.orangeAccent,
-              heroTag: "statusBtn",
-              child: const Icon(Icons.edit, size: 18),
-            ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Batal'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        _updateStatus();
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Update'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            label: const Text("Status"),
+            icon: const Icon(Icons.edit),
+            heroTag: "statusBtn",
           ),
-          Positioned(
-            bottom: 16,
-            left: 16,
-            child: FloatingActionButton.small(
-              onPressed: () {
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const GroupScreen()))
-                    .then((_) => _initMapData());
-              },
-              backgroundColor: Colors.deepPurpleAccent,
-              heroTag: "groupBtn",
-              child: const Icon(Icons.group, size: 18),
-            ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const GroupScreen()))
+                  .then((_) => _initMapData());
+            },
+            label: const Text("Menu Grup"),
+            icon: const Icon(Icons.group),
+            heroTag: "groupBtn",
           ),
         ],
       ),
     );
-  }
-  // 1. WADAH PANEL ANGGOTA
-  Widget _buildMembersListPanel() {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: _locationService.streamGroupData(_myGroupId!),
-      builder: (context, groupSnapshot) {
-        if (!groupSnapshot.hasData || !groupSnapshot.data!.exists) return const SizedBox();
-        final Map<String, dynamic> groupData = groupSnapshot.data!.data() as Map<String, dynamic>;
-        final List<String> memberIds = List<String>.from(groupData['members'] ?? []);
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            InkWell(
-              onTap: () => setState(() => _isMemberListOpen = !_isMemberListOpen),
-              child: Container(
-                height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white, borderRadius: BorderRadius.circular(20),
-                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.people, color: Colors.blue, size: 20),
-                    const SizedBox(width: 6),
-                    Text("Anggota (${memberIds.length})", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                    Icon(_isMemberListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: Colors.grey),
-                ]),
-              ),
-            ),
-            if (_isMemberListOpen)
-              Container(
-                margin: const EdgeInsets.only(top: 6),
-                width: 200,
-                constraints: const BoxConstraints(maxHeight: 200),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.95), borderRadius: BorderRadius.circular(12),
-                ),
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: _locationService.streamUsersLocation(memberIds),
-                  builder: (context, usersSnapshot) {
-                    if (!usersSnapshot.hasData) return const Padding(padding: EdgeInsets.all(10), child: Center(child: CircularProgressIndicator()));
-                    final docs = usersSnapshot.data!.docs;
-                    return ListView.separated(
-                      padding: const EdgeInsets.all(8),
-                      shrinkWrap: true,
-                      itemCount: docs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                         final data = docs[index].data() as Map<String, dynamic>;
-                         // Tampilan simpel nama anggota
-                         return Padding(
-                           padding: const EdgeInsets.symmetric(vertical: 4),
-                           child: Text(data['name'] ?? 'User', style: const TextStyle(fontSize: 12)),
-                         );
-                      },
-                    );
-                  },
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  // 2. WADAH PANEL MEETING
-  Widget _buildMeetingsListPanel() {
-      return StreamBuilder<QuerySnapshot>(
-          stream: _meetingRepo.streamMeetingsByGroup(_myGroupId!),
-          builder: (context, meetingSnapshot) {
-            if (!meetingSnapshot.hasData) return const SizedBox();
-            final meetings = meetingSnapshot.data!.docs;
-            
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                 InkWell(
-                    onTap: () => setState(() => _isMeetingListOpen = !_isMeetingListOpen),
-                    child: Container(
-                        height: 40,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                            color: Colors.white, borderRadius: BorderRadius.circular(20),
-                            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            const Icon(Icons.location_on, color: Colors.green, size: 20),
-                            const SizedBox(width: 6),
-                            Text("Meetings (${meetings.length})", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                            Icon(_isMeetingListOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: Colors.grey),
-                        ]),
-                    ),
-                 ),
-                 if (_isMeetingListOpen)
-                    Container(
-                        margin: const EdgeInsets.only(top: 6),
-                        width: 200,
-                        constraints: const BoxConstraints(maxHeight: 200),
-                        decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.95), borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: ListView.separated(
-                            padding: const EdgeInsets.all(8),
-                            shrinkWrap: true,
-                            itemCount: meetings.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
-                            itemBuilder: (context, index) {
-                                final data = meetings[index].data() as Map<String, dynamic>;
-                                return Padding(
-                                   padding: const EdgeInsets.symmetric(vertical: 4),
-                                   child: Text(data['placeName'] ?? 'Tempat', style: const TextStyle(fontSize: 12)),
-                                );
-                            },
-                        ),
-                    ),
-              ],
-            );
-          },
-      );
   }
 }
